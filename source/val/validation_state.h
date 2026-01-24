@@ -522,6 +522,29 @@ class ValidationState_t {
         [dec](const Decoration& d) { return dec == d.dec_type(); });
   }
 
+  /// Returns true if the given id <id> has the given built-in decoration <bt>,
+  /// otherwise returns false.
+  bool IsBuiltin(spv::Id id, spv::BuiltIn bt) {
+    for (auto& dec : id_decorations(id)) {
+      if (dec.dec_type() == spv::Decoration::BuiltIn) {
+        if (dec.builtin() == bt) return true;
+        break;
+      }
+    }
+    return false;
+  }
+
+  bool ContainsBuiltin(spv::Id id, spv::BuiltIn bt) {
+    const auto isHeapType = [&](const Instruction* inst) {
+      if (HasCapability(spv::Capability::DescriptorHeapEXT) &&
+          IsBuiltin(inst->id(), bt)) {
+        return true;
+      }
+      return false;
+    };
+    return ContainsType(uint32_t(id), isHeapType);
+  }
+
   /// Finds id's def, if it exists.  If found, returns the definition otherwise
   /// nullptr
   const Instruction* FindDef(uint32_t id) const;
@@ -664,6 +687,7 @@ class ValidationState_t {
   // Only works for types not for objects.
   bool IsVoidType(uint32_t id) const;
   bool IsScalarType(uint32_t id) const;
+  bool IsVectorType(uint32_t id) const;
   bool IsBfloat16ScalarType(uint32_t id) const;
   bool IsBfloat16VectorType(uint32_t id) const;
   bool IsBfloat16CoopMatType(uint32_t id) const;
@@ -672,7 +696,7 @@ class ValidationState_t {
   bool IsFP8VectorType(uint32_t id) const;
   bool IsFP8CoopMatType(uint32_t id) const;
   bool IsFP8Type(uint32_t id) const;
-  bool IsFloatScalarType(uint32_t id) const;
+  bool IsFloatScalarType(uint32_t id, uint32_t width = 0) const;
   bool IsFloatArrayType(uint32_t id) const;
   bool IsFloatVectorType(uint32_t id) const;
   bool IsFloat16Vector2Or4Type(uint32_t id) const;
@@ -707,10 +731,39 @@ class ValidationState_t {
   bool IsIntCooperativeVectorNVType(uint32_t id) const;
   bool IsUnsignedIntCooperativeVectorNVType(uint32_t id) const;
   bool IsTensorType(uint32_t id) const;
+  bool IsDescriptorType(spv::Op opcode) const;
+  bool IsDescriptorType(uint32_t id) const;
   // When |length| is not 0, return true only if the array length is equal to
   // |length| and the array length is not defined by a specialization constant.
   bool IsArrayType(uint32_t id, uint64_t length = 0) const;
   bool IsIntArrayType(uint32_t id, uint64_t length = 0) const;
+  template <unsigned int N>
+  bool IsIntNOrFP32OrFP16(unsigned int type_id) {
+    return this->ContainsType(
+        type_id,
+        [](const Instruction* inst) {
+          if (inst->opcode() == spv::Op::OpTypeInt) {
+            return inst->GetOperandAs<uint32_t>(1) == N;
+          } else if (inst->opcode() == spv::Op::OpTypeFloat) {
+            if (inst->operands().size() > 2) {
+              // Not IEEE
+              return false;
+            }
+            auto width = inst->GetOperandAs<uint32_t>(1);
+            return width == 32 || width == 16;
+          }
+          return false;
+        },
+        /* traverse_all_types = */ false);
+  }
+
+  // Will walk the type to find the largest scalar value size.
+  // Returns value is in bytes.
+  // This is designed to pass in the %type from a PSB pointer
+  //   %ptr = OpTypePointer PhysicalStorageBuffer %type
+  uint32_t GetLargestScalarType(uint32_t id) const;
+  bool IsDescriptorHeapBaseVariable(const Instruction* inst);
+  const Instruction* FindUntypedBaseVariable(const Instruction* inst);
 
   // Returns true if |id| is a type id that contains |type| (or integer or
   // floating point type) of |width| bits.
@@ -750,6 +803,17 @@ class ValidationState_t {
   // Provides information on pointer type. Returns false iff not pointer type.
   bool GetPointerTypeInfo(uint32_t id, uint32_t* data_type,
                           spv::StorageClass* storage_class) const;
+
+  // Returns the value assocated with id via 'value' if id is an OpConstant
+  template <typename T>
+  bool GetConstantValueAs(unsigned int id, T& value) {
+    const auto inst = FindDef(id);
+    uint64_t ui64_val = 0u;
+    bool status = (inst && spvOpcodeIsConstant(inst->opcode()) &&
+                   EvalConstantValUint64(id, &ui64_val));
+    if (status == true) value = static_cast<T>(ui64_val);
+    return status;
+  }
 
   // Is the ID the type of a pointer to a uniform block: Block-decorated struct
   // in uniform storage class? The result is only valid after internal method

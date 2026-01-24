@@ -348,7 +348,7 @@ spv_result_t ValidateBinaryUsingContextAndValidationState(
   if (auto error = ValidateForwardDecls(*vstate)) return error;
 
   // Calculate reachability after all the blocks are parsed, but early that it
-  // can be relied on in subsequent pases.
+  // can be relied on in subsequent passes.
   ReachabilityPass(*vstate);
 
   // ID usage needs be handled in its own iteration of the instructions,
@@ -399,6 +399,7 @@ spv_result_t ValidateBinaryUsingContextAndValidationState(
     if (auto error = RayQueryPass(*vstate, &instruction)) return error;
     if (auto error = RayTracingPass(*vstate, &instruction)) return error;
     if (auto error = RayReorderNVPass(*vstate, &instruction)) return error;
+    if (auto error = RayReorderEXTPass(*vstate, &instruction)) return error;
     if (auto error = MeshShadingPass(*vstate, &instruction)) return error;
     if (auto error = TensorLayoutPass(*vstate, &instruction)) return error;
     if (auto error = TensorPass(*vstate, &instruction)) return error;
@@ -430,6 +431,7 @@ spv_result_t ValidateBinaryUsingContextAndValidationState(
     if (auto error = ValidateQCOMImageProcessingTextureUsages(*vstate, &inst))
       return error;
   }
+  if (auto error = ValidateLogicalPointers(*vstate)) return error;
 
   return SPV_SUCCESS;
 }
